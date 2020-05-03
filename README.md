@@ -1,2 +1,2 @@
-# Qiita_codes
- Scripts to create figures for Qiita
+# Qiita投稿記事スクリプト
+ Qiitaへの投稿記事に関連した解析スクリプトを公開しています。
