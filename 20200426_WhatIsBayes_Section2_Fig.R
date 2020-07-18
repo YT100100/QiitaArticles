@@ -1,4 +1,5 @@
 library(glmnet)
+library(BGLR)
 
 
 #### Set working directory ####
@@ -7,7 +8,7 @@ SetWorkingDirectory <- function() {
   today <- gsub('-', '', Sys.Date())
   output_directory <- paste0('Section2_', today)
   output_path <- file.path('20200329_WhatIsBayes', output_directory)
-  if (! output_directory %in% list.files('20200329_WhatIsBayes')) {
+  if (!output_directory %in% list.files('20200329_WhatIsBayes')) {
     dir.create(output_path)
   }
   print(output_path)
@@ -19,94 +20,296 @@ SetWorkingDirectory()
 
 #### Create data ####
 
-# function to draw plot
-DrawPlot <- function(
-  x, y, main = '', ...
-) {
-  par(mar = c(7, 7, 7, 2) + 0.1)
-  plot(x, y, ann = FALSE, cex = 3, cex.axis = 2, ...)
-  title(main = main, cex.main = 3)
-  title(xlab = expression(paste(italic(x))), line = 5, cex.lab = 3, family = 'serif')
-  title(ylab = expression(italic(t)), line = 4, cex.lab = 3, family = 'serif')
-  par(mar = c(5, 4, 4, 2) + 0.1)
-}
-
-# function to draw estimated curve by ML
-DrawCurve_lm <- function(lmres, x, ...) {
-  plotarea <- par()$usr
-  x <- seq(plotarea[1], plotarea[2], length.out = 1000)
-  y <- predict(lmres, data.frame(x))
-  is_in_area <- (plotarea[3] <= y) & (plotarea[4] >= y)
-  y[!is_in_area] <- NA
-  lines(x, y, ...)
-}
-
-# function to draw estimated curve by ridge regression
-DrawCurve_ridge <- function(lmres, ...) {
-  plotarea <- par()$usr
-  x <- seq(plotarea[1], plotarea[2], length.out = 1000)
-  x_poly <- poly(x, 9, raw = TRUE)
-  y <- predict(ridgeres, x_poly)[, 1]
-  is_in_area <- (plotarea[3] <= y) & (plotarea[4] >= y)
-  y[!is_in_area] <- NA
-  lines(x, y, ...)
-}
-
 # true function
 TrueFunction <- function(x) {
-  5 * (x - 0) * (x - 0.6) * (x - 0.9)
+  w <- c(50, 1.3, 0.5, 1, rep(0, 7))
+  x <- c(1, x)
+  sum(w * x)
 }
 
-# data creation : cubic function
-CreatePlantData <- function() {
+# data generation
+CreateScoreData <- function(n) {
+  q <- 10
+  
+  # generate predictor variable
   set.seed(1984)
-  x <- seq(0, 1, length.out = 10)
-  n <- length(x)
-  e <- rnorm(n, mean = 0, sd = 0.05)
-  y <- TrueFunction(x) + e
-  data.frame(x = x, y = y)
+  X <- matrix(round(runif(n * q, 60, 90)), ncol = q, nrow = n)
+  colnames(X) <- paste0('Subject', 1:q)
+  rownames(X) <- paste0('Student', 1:n)
+  
+  # generate responce variable
+  e <- rnorm(n, mean = 0, sd = 3)
+  y <- round(apply(X, 1, TrueFunction) + e)
+  y <- ifelse(y > 300, 300, y)
+  dat <- data.frame(y, X)
+  list(Xmat = X, y = y, dat = dat)
+  
 }
-dat <- CreatePlantData()
+datlist <- CreateScoreData(n = 12)
+
+# function to calculate range of plot
+PlotLim <- function(Xmat, y) {
+  xrange <- range(Xmat)
+  xlim <- c(weighted.mean(xrange, c(1.1, -0.1)),
+            weighted.mean(xrange, c(-0.1, 1.1)))
+  xrange <- range(y)
+  ylim <- c(weighted.mean(xrange, c(1.1, -0.1)),
+            weighted.mean(xrange, c(-0.1, 1.1)))
+  list(xlim = xlim, ylim = ylim)
+  
+}
+
+# function to draw scatter plot
+DrawScatterPlot <- function(x, y, i, ...) {
+  par(mar = c(9, 4, 0, 2) + 0.1)
+  plot(x,
+       y,
+       cex = 1,
+       cex.axis = 1,
+       ann = FALSE,
+       ...)
+  title(
+    xlab = bquote(italic(x)[.(i)]),
+    line = 4,
+    cex.lab = 2.5,
+    family = 'serif'
+  )
+  
+}
+
+# function to draw true line
+DrawRegressionLine <- function(Xmat, coefval, i, ...) {
+  Xmat <- cbind(1, Xmat)
+  Xmean <- apply(Xmat, 2, mean)
+  yval <- sum((Xmean * coefval)[-(i + 1)])
+  abline(yval, coefval[i + 1], ...)
+  
+}
 
 
 
-#### Plot ####
+#### Data visualization ####
 
-## Data visualization
-png('fig1.png', width = 960, height = 960)
-DrawPlot(dat$x, dat$y, main = 'Fig 1', 
-         xlim = c(-0.05, 1.05), ylim = c(-0.3, 0.5))
+png('fig1_Visualization.png',
+    width = 1200,
+    height = 540)
+par_default <- par(no.readonly = TRUE)
+par(mfrow = c(2, 5), oma = c(0, 0, 5, 0))
+with(datlist, {
+  q <- ncol(Xmat)
+  lims <- PlotLim(Xmat, y)
+  for (i in 1:q) {
+    DrawScatterPlot(Xmat[, i],
+                    y,
+                    i = i,
+                    xlim = lims$xlim,
+                    ylim = lims$ylim)
+    DrawRegressionLine(Xmat,
+                       coefval = c(50, 1.3, 0.5, 1, rep(0, 7)),
+                       i,
+                       lty = 2)
+    
+  }
+  
+})
+mtext(
+  'Figure 1',
+  line = 2,
+  outer = TRUE,
+  font = 2,
+  cex = 2
+)
+par(par_default)
 dev.off()
 
-## Estimation with ML
-lmres <- lm(y ~ poly(x, 9, raw = TRUE), dat)
-plotx <- seq(-0.05, 1.05, length.out = 100)
-ploty1 <- predict(lmres, data.frame(x = plotx))
-coef_lmres <- signif(coef(lmres), 5)
-names(coef_lmres) <- NULL; options(scipen = 2); print(coef_lmres)
 
-## Draw curve estimated with ML
-png('fig2.png', width = 960, height = 960)
-DrawPlot(dat$x, dat$y, main = 'Fig 2', 
-         xlim = c(-0.05, 1.05), ylim = c(-0.3, 0.5))
-DrawCurve_lm(lmres)
-curve(TrueFunction(x), lty = 2, col = 'gray50', add = TRUE)
+
+#### estimation with ML ####
+
+lmres <- lm(y ~ ., datlist$dat)
+print(round(coef(lmres), 2))
+print(summary(lmres)$sigma)
+
+png('fig2_MLestimation.png', width = 1200, height = 540)
+par_default <- par(no.readonly = TRUE)
+par(mfrow = c(2, 5), oma = c(0, 0, 5, 0))
+with(datlist, {
+  q <- ncol(Xmat)
+  lims <- PlotLim(Xmat, y)
+  for (i in 1:q) {
+    DrawScatterPlot(Xmat[, i],
+                    y,
+                    i = i,
+                    xlim = lims$xlim,
+                    ylim = lims$ylim)
+    DrawRegressionLine(Xmat,
+                       coefval = c(50, 1.3, 0.5, 1, rep(0, 7)),
+                       i,
+                       lty = 2)
+    DrawRegressionLine(Xmat, coefval = coef(lmres),
+                       i, col = 'red')
+    
+  }
+  
+})
+mtext(
+  'Figure 2',
+  line = 2,
+  outer = TRUE,
+  font = 2,
+  cex = 2
+)
+par(par_default)
 dev.off()
 
-## Estimation with ridge regression
-datx_poly <- poly(dat$x, 9, raw = TRUE)
-ridgeres <- cv.glmnet(datx_poly, dat$y, alpha = 0)
-ploty2 <- predict(ridgeres, datx_poly)
-coef_ridgeres <- signif(coef(ridgeres)[, 1], 5)
-names(coef_ridgeres) <- NULL; options(scipen = 2); print(coef_ridgeres)
 
-## Draw curve estimated with ridge regression
-png('fig3.png', width = 960, height = 960)
-DrawPlot(dat$x, dat$y, main = 'Fig 3', 
-         xlim = c(-0.05, 1.05), ylim = c(-0.3, 0.5))
-DrawCurve_lm(lmres, col = 'red', lty = 3)
-DrawCurve_ridge(ridgeres)
-curve(TrueFunction(x), lty = 2, col = 'gray50', add = TRUE)
+
+#### estimation with ridge regression ####
+
+lambda_vec <- exp(seq(-8, 8, length.out = 100))
+glmres <- cv.glmnet(datlist$Xmat, datlist$y, alpha = 0,
+                    grouped = FALSE)
+print(round(coef(glmres)[, 1], 2))
+print(glmres$lambda.min)
+
+png('fig3_RidgeRegression.png',
+    width = 1200,
+    height = 540)
+par_default <- par(no.readonly = TRUE)
+par(mfrow = c(2, 5), oma = c(0, 0, 5, 0))
+with(datlist, {
+  q <- ncol(Xmat)
+  lims <- PlotLim(Xmat, y)
+  for (i in 1:q) {
+    DrawScatterPlot(Xmat[, i],
+                    y,
+                    i = i,
+                    xlim = lims$xlim,
+                    ylim = lims$ylim)
+    DrawRegressionLine(Xmat,
+                       coefval = c(50, 1.3, 0.5, 1, rep(0, 7)),
+                       i,
+                       lty = 2)
+    DrawRegressionLine(Xmat, coefval = coef(glmres)[, 1],
+                       i, col = 'blue')
+    
+  }
+  
+})
+mtext(
+  'Figure 3',
+  line = 2,
+  outer = TRUE,
+  font = 2,
+  cex = 2
+)
+par(par_default)
 dev.off()
 
+
+
+#### estimation with Bayesian ridge regression ####
+
+bglrres <-
+  BGLR(
+    datlist$y,
+    ETA = list(subject = list(X = datlist$Xmat, model = 'BRR')),
+    nIter = 1200,
+    burnIn = 200,
+    saveAt = 'BGLR_',
+    verbose = FALSE
+  )
+print(round(bglrres$mu, 2))
+print(round(bglrres$ETA$subject$b, 2))
+print(round(bglrres$varE, 2))
+print(round(bglrres$ETA$subject$varB, 2))
+
+png('fig4_BayesianRidgeRegression.png',
+    width = 1200,
+    height = 540)
+par_default <- par(no.readonly = TRUE)
+par(mfrow = c(2, 5), oma = c(0, 0, 5, 0))
+with(datlist, {
+  q <- ncol(Xmat)
+  lims <- PlotLim(Xmat, y)
+  for (i in 1:q) {
+    DrawScatterPlot(Xmat[, i],
+                    y,
+                    i = i,
+                    xlim = lims$xlim,
+                    ylim = lims$ylim)
+    DrawRegressionLine(Xmat,
+                       coefval = c(50, 1.3, 0.5, 1, rep(0, 7)),
+                       i,
+                       lty = 2)
+    DrawRegressionLine(Xmat,
+                       coefval = c(bglrres$mu, bglrres$ETA$subject$b),
+                       i,
+                       col = 'green4')
+    
+  }
+  
+})
+mtext(
+  'Figure 4',
+  line = 2,
+  outer = TRUE,
+  font = 2,
+  cex = 2
+)
+par(par_default)
+dev.off()
+
+png('fig5_BayesianRidgeRegression_CoefDistribution.png',
+    width = 1200,
+    height = 540)
+par_default <- par(no.readonly = TRUE)
+par(mfrow = c(2, 5), oma = c(0, 0, 5, 0))
+for (i in 1:ncol(datlist$Xmat)) {
+  
+  par(mar = c(9, 4, 0, 2) + 0.1)
+  
+  # prepare values
+  priodis_sd <- sqrt(with(bglrres$ETA$subject, S0 / (df0 - 2)))
+  postdis_m <- bglrres$ETA$subject$b[i]
+  postdis_sd <- bglrres$ETA$subject$SD.b[i]
+  trueval <- c(50, 1.3, 0.5, 1, rep(0, 7))[i + 1]
+  dprio <- function(x) dnorm(x, 0, priodis_sd)
+  dpost <- function(x) dnorm(x, postdis_m, postdis_sd)
+  
+  # prepare for polygon()
+  polyx <- seq(-3, 3, 0.01)
+  polyy0 <- rep(0, length(polyx))
+  polyy1 <- dprio(polyx)
+  polyy2 <- dpost(polyx)
+  
+  # plot
+  curve(dpost, xlim = c(-3, 3), ylim = c(0, 2.2), ann = FALSE)
+  curve(dprio, add = TRUE)
+  polygon(c(polyx, rev(polyx)),
+          c(polyy1, polyy0),
+          col = rgb(1, 0, 0, 0.3),
+          border = NA)
+  polygon(c(polyx, rev(polyx)),
+          c(polyy2, polyy0),
+          col = rgb(0, 0, 1, 0.2),
+          border = NA)
+  abline(v = trueval)
+  title(
+    xlab = bquote(italic(w)[.(i)]),
+    family = 'serif',
+    line = 4,
+    cex.lab = 2.5
+  )
+  
+}
+mtext(
+  'Figure 5',
+  line = 2,
+  outer = TRUE,
+  font = 2,
+  cex = 2
+)
+par(par_default)
+dev.off()
 
